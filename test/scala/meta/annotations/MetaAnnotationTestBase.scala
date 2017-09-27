@@ -4,6 +4,7 @@ import java.io.File
 
 import com.intellij.ProjectTopics
 import com.intellij.compiler.server.BuildManager
+import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.module.{JavaModuleType, Module}
 import com.intellij.openapi.project.Project
@@ -27,6 +28,7 @@ import org.jetbrains.plugins.scala.util.TestUtils
 import org.junit.Assert
 import org.junit.Assert.fail
 
+import scala.collection.JavaConverters.collectionAsScalaIterableConverter
 import scala.meta.ScalaMetaLibrariesOwner.MetaBaseLoader
 import scala.meta.{Compilable, ScalaMetaLibrariesOwner}
 
@@ -124,6 +126,15 @@ abstract class MetaAnnotationTestBase extends JavaCodeInsightFixtureTestCase wit
       case Left(error)  => fail(s"Expansion failed: $error")
       case _ =>
     }
+  }
+
+  protected def checkNoErrorHighlights(expectedMessagePrefix: String = ""): Unit = {
+    val errors = myFixture.doHighlighting(HighlightSeverity.ERROR).asScala
+    val (related, unrelated) = errors.partition(_.getDescription.startsWith(expectedMessagePrefix))
+    val suffix = if (unrelated.size > 1) s"\nOther errors found:\n${unrelated.mkString("\n")}" else ""
+    val prefix = related.mkString("\n")
+    if (related.nonEmpty)
+      Assert.fail(prefix + suffix)
   }
 
   protected def getGutter: GutterIconRenderer = {
