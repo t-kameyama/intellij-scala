@@ -426,7 +426,7 @@ abstract class ScalaAnnotator extends Annotator
     }
 
     element match {
-      case sTypeParam: ScTypeBoundsOwner =>
+      case sTypeParam: ScPolymorphicElement =>
         checkTypeParamBounds(sTypeParam, holder)
       case _ =>
     }
@@ -569,14 +569,42 @@ abstract class ScalaAnnotator extends Annotator
     teAnnotation
   }
 
-  private def checkTypeParamBounds(sTypeParam: ScTypeBoundsOwner, holder: AnnotationHolder) {
-    for {
-      lower <- sTypeParam.lowerBound
-      upper <- sTypeParam.upperBound
-      if !lower.conforms(upper)
-      annotation = holder.createErrorAnnotation(sTypeParam,
-        ScalaBundle.message("lower.bound.conform.to.upper", upper, lower))
-    } annotation.setHighlightType(ProblemHighlightType.GENERIC_ERROR)
+  //SCL-7139
+  //todo: support cyclic bounds and higher order type parameters
+  private def checkTypeParamBounds(sTypeParam: ScPolymorphicElement, holder: AnnotationHolder) {
+    def nameInBound(te: Option[ScTypeElement]) = te.flatMap {
+      case ScSimpleTypeElement(Some(ref)) if ref.qualifier.isEmpty => Some(ref.refName)
+      case _ => None
+    }
+
+    val name = sTypeParam.name
+    val nameInLower = nameInBound(sTypeParam.lowerTypeElement)
+    val nameInUpper = nameInBound(sTypeParam.upperTypeElement)
+
+    if (nameInLower.contains(name) || nameInUpper.contains(name)) {
+      val message = ScalaBundle.message("has.itself.as.bound", name)
+      holder.createErrorAnnotation(sTypeParam, message)
+        .setHighlightType(ProblemHighlightType.GENERIC_ERROR)
+    }
+
+    val owner = sTypeParam match {
+      case tp: ScTypeParam => Set(tp.owner)
+      case _ => Set.empty
+    }
+    val otherParamNames = owner.flatMap(_.typeParameters).map(_.name) - name
+
+    if (nameInLower.exists(otherParamNames.contains) && nameInUpper.exists(otherParamNames.contains)) {
+      for {
+        lower <- sTypeParam.lowerBound
+        upper <- sTypeParam.upperBound
+      } {
+        if (!lower.conforms(upper)) {
+          val message = ScalaBundle.message("lower.bound.conform.to.upper", upper, lower)
+          holder.createErrorAnnotation(sTypeParam, message)
+            .setHighlightType(ProblemHighlightType.GENERIC_ERROR)
+        }
+      }
+    }
   }
 
   private def registerUsedElement(element: PsiElement, resolveResult: ScalaResolveResult,

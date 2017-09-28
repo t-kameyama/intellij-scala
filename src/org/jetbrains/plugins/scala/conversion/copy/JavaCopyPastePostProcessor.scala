@@ -23,6 +23,7 @@ import org.jetbrains.plugins.scala.extensions._
 import org.jetbrains.plugins.scala.lang.psi.api.ScalaFile
 import org.jetbrains.plugins.scala.project.ProjectExt
 import org.jetbrains.plugins.scala.settings._
+import org.jetbrains.plugins.scala.util.UIFreezingGuard
 
 import scala.collection.mutable.ListBuffer
 
@@ -61,44 +62,48 @@ class JavaCopyPastePostProcessor extends SingularCopyPastePostProcessor[TextBloc
           } else Seq.empty
       }
 
-      val associationsHelper = new ListBuffer[AssociationHelper]()
-      val resultNode = new MainConstruction
-      val (topElements, dropElements) = ConverterUtil.getTopElements(file, startOffsets, endOffsets)
-      val data = getRefs
-      for (part <- topElements) {
-        part match {
-          case TextPart(s) =>
-            resultNode.addChild(LiteralExpression(s))
-          case ElementPart(comment: PsiComment) =>
-            if (!dropElements.contains(comment))
-              resultNode.addChild(LiteralExpression(comment.getText))
-            dropElements.add(comment)
-          case ElementPart(element) =>
-            val result = JavaToScala.convertPsiToIntermdeiate(element, null)(associationsHelper, data, dropElements, textMode = false)
-            resultNode.addChild(result)
+      UIFreezingGuard.withTimeout[TextBlockTransferableData](500, null) {
+
+        val associationsHelper = new ListBuffer[AssociationHelper]()
+        val resultNode = new MainConstruction
+        val (topElements, dropElements) = ConverterUtil.getTopElements(file, startOffsets, endOffsets)
+        val data = getRefs
+        for (part <- topElements) {
+          part match {
+            case TextPart(s) =>
+              resultNode.addChild(LiteralExpression(s))
+            case ElementPart(comment: PsiComment) =>
+              if (!dropElements.contains(comment))
+                resultNode.addChild(LiteralExpression(comment.getText))
+              dropElements.add(comment)
+            case ElementPart(element) =>
+              val result = JavaToScala.convertPsiToIntermdeiate(element, null)(associationsHelper, data, dropElements, textMode = false)
+              resultNode.addChild(result)
+          }
         }
+
+        val visitor = new PrintWithComments
+        visitor.visit(resultNode)
+        val text = visitor.stringResult
+        val rangeMap = visitor.rangedElementsMap
+
+        val updatedAssociations = associationsHelper.filter(_.itype.isInstanceOf[TypedElement]).
+          map { a =>
+            val typedElement = a.itype.asInstanceOf[TypedElement].getType
+            val range = rangeMap.getOrElse(typedElement, new TextRange(0, 0))
+            Association(a.kind, range, a.path)
+          }
+
+        updatedAssociations ++= associationsHelper.filter(_.itype.isInstanceOf[JavaCodeReferenceStatement]).
+          map { a =>
+            val range = rangeMap.getOrElse(a.itype, new TextRange(0, 0))
+            Association(a.kind, range, a.path)
+          }
+
+        val oldText = ConverterUtil.getTextBetweenOffsets(file, startOffsets, endOffsets)
+        new ConverterUtil.ConvertedCode(text, updatedAssociations.toArray, ConverterUtil.compareTextNEq(oldText, text))
       }
 
-      val visitor = new PrintWithComments
-      visitor.visit(resultNode)
-      val text = visitor.stringResult
-      val rangeMap = visitor.rangedElementsMap
-
-      val updatedAssociations = associationsHelper.filter(_.itype.isInstanceOf[TypedElement]).
-        map { a =>
-          val typedElement = a.itype.asInstanceOf[TypedElement].getType
-          val range = rangeMap.getOrElse(typedElement, new TextRange(0, 0))
-          Association(a.kind, range, a.path)
-        }
-
-      updatedAssociations ++= associationsHelper.filter(_.itype.isInstanceOf[JavaCodeReferenceStatement]).
-        map { a =>
-          val range = rangeMap.getOrElse(a.itype, new TextRange(0, 0))
-          Association(a.kind, range, a.path)
-        }
-
-      val oldText = ConverterUtil.getTextBetweenOffsets(file, startOffsets, endOffsets)
-      new ConverterUtil.ConvertedCode(text, updatedAssociations.toArray, ConverterUtil.compareTextNEq(oldText, text))
     } catch {
       case e: Exception =>
         val selections = (startOffsets, endOffsets).zipped.map((a, b) => file.getText.substring(a, b))
