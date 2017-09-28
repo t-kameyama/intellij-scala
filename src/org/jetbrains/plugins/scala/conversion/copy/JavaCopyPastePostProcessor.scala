@@ -21,6 +21,7 @@ import org.jetbrains.plugins.scala.conversion.ast.{JavaCodeReferenceStatement, L
 import org.jetbrains.plugins.scala.conversion.visitors.PrintWithComments
 import org.jetbrains.plugins.scala.extensions._
 import org.jetbrains.plugins.scala.lang.psi.api.ScalaFile
+import org.jetbrains.plugins.scala.project.ProjectExt
 import org.jetbrains.plugins.scala.settings._
 
 import scala.collection.mutable.ListBuffer
@@ -40,8 +41,11 @@ class JavaCopyPastePostProcessor extends SingularCopyPastePostProcessor[TextBloc
     .find(_.isInstanceOf[ScalaCopyPastePostProcessor]).get.asInstanceOf[ScalaCopyPastePostProcessor]
 
   protected def collectTransferableData0(file: PsiFile, editor: Editor, startOffsets: Array[Int], endOffsets: Array[Int]): TextBlockTransferableData = {
-    if (DumbService.getInstance(file.getProject).isDumb) return null
-    if (!ScalaProjectSettings.getInstance(file.getProject).isEnableJavaToScalaConversion ||
+    val project = file.getProject
+
+    if (DumbService.getInstance(project).isDumb || !project.hasScala) return null
+
+    if (!ScalaProjectSettings.getInstance(project).isEnableJavaToScalaConversion ||
       !file.isInstanceOf[PsiJavaFile]) return null
 
     try {

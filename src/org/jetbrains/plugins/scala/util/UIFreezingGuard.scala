@@ -97,7 +97,7 @@ object UIFreezingGuard {
 
     val startTime = System.currentTimeMillis()
     try {
-      ProgressManager.getInstance().runProcess(computation, new AbstractProgressIndicatorBase {
+      ProgressManager.getInstance().runProcess(computation, new AbstractProgressIndicatorBase with StandardProgressIndicator {
         override def isCanceled: Boolean = {
           System.currentTimeMillis() - startTime > timeoutMs || super.isCanceled
         }
